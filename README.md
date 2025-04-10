@@ -57,7 +57,74 @@ Built natively into the Monkeytype frontend and paired with a backend report log
 `src/App.tsx`
 
 ```tsx
-// Paste provided detection script here within a useEffect
+useEffect(() => {
+  const suspiciousFlags = {
+    isWebDriver: navigator.webdriver,
+    noPlugins: navigator.plugins.length === 0,
+    headlessUserAgent: /HeadlessChrome|PhantomJS|puppeteer|selenium/i.test(navigator.userAgent),
+    noMouseMovement: true,
+    sameDelayTyping: false,
+    noFocus: false,
+  };
+
+  const typingTimestamps: number[] = [];
+  const MAX_TYPING_LOG = 50;
+
+  const handleMouseMove = () => {
+    suspiciousFlags.noMouseMovement = false;
+  };
+
+  const handleKeyDown = () => {
+    const now = performance.now();
+    typingTimestamps.push(now);
+    if (typingTimestamps.length > MAX_TYPING_LOG) {
+      typingTimestamps.shift();
+    }
+
+    if (typingTimestamps.length > 10) {
+      const deltas = typingTimestamps.slice(1).map((t, i) => t - typingTimestamps[i]);
+      const avgDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+      const variance = deltas.reduce((a, b) => a + Math.abs(b - avgDelta), 0) / deltas.length;
+      suspiciousFlags.sameDelayTyping = variance < 5;
+    }
+  };
+
+  const handleBlur = () => {
+    suspiciousFlags.noFocus = true;
+  };
+
+  window.addEventListener('mousemove', handleMouseMove);
+  window.addEventListener('keydown', handleKeyDown);
+  window.addEventListener('blur', handleBlur);
+
+  const evaluateFlags = () => {
+    const botIndicators = Object.values(suspiciousFlags).filter(Boolean).length;
+
+    if (botIndicators >= 3) {
+      alert('⚠️ Automation detected. This test may be flagged or ignored.');
+
+      fetch('/api/report-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timestamp: new Date().toISOString(),
+          flags: suspiciousFlags,
+          userAgent: navigator.userAgent,
+        }),
+      });
+    }
+
+    // Cleanup
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('keydown', handleKeyDown);
+    window.removeEventListener('blur', handleBlur);
+  };
+
+  const timeout = setTimeout(evaluateFlags, 15000);
+
+  return () => clearTimeout(timeout);
+}, []);
+
 ```
 
 ### ➕ Backend Route Example (Express.js):
